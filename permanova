@@ -1,0 +1,113 @@
+library(knitr)
+library(tidyverse)
+library(vegan)
+library(classInt)
+
+#example species dataframe
+data(dune)
+
+#example predictor variables dataframe
+data(dune.env)
+
+####################
+#PERMANOVA ANALYSIS#
+####################
+
+
+#Create Chao dissimilarity matrix
+#Change the method to that which best works for your data's distribution and origin
+#Learn more about ordination methods in the vegdist function description
+chao <- vegdist(dune, method = "chao")
+
+#Run PERMANOVA on all predictors
+perm.chao.all <- adonis(chao ~ .,
+                    data = dune.env)
+
+#Display output from PERMANOVA model
+perm.chao.all$aov.tab %>%
+  as.data.frame() %>% #pull the results table out of the list of model results
+  round(3) %>% #round all the metrics to the third decimal for cleaner display
+  mutate(Variable = row.names(.)) %>% #variables are stored in row names; make them their own column
+  select(c(7,1:6)) %>% #rearrange the dataframe for cleaner display
+  arrange(desc(F.Model)) %>% #sort from greatest significance to least
+  kable() #display in a table
+
+#Run PERMANOVA on selected predictors
+perm.chao <- adonis(chao ~ A1 + Moisture + Management,
+                    data = dune.env)
+
+#Display output from PERMANOVA model
+perm.chao$aov.tab %>%
+  as.data.frame() %>% 
+  round(3) %>% 
+  mutate(Variable = row.names(.)) %>% 
+  select(c(7,1:6)) %>% 
+  arrange(desc(F.Model)) %>% 
+  kable()
+
+#######################
+#PREP RESULTS FOR PLOT#
+#######################
+
+
+#find statistically significant groups in the distribution of canopy cover
+classes <- classIntervals(dune.env$A1,
+                          n = 4, #choose number of groups to make
+                          style = "jenks")$brks #Jenks is best for visualisation
+
+#print the minimum, class breaks, and maximum calculated above
+classes
+
+#create a dataframe to use to plot/visualise the data
+df.plot <- dune.env %>%
+  select(c(A1, Moisture, Management)) %>% #select vars in model
+  #use the calculated breaks to make A1 into a categorical variable for easier display
+  mutate(class_A1 = case_when(A1 <= classes[[2]] ~ "low",  #if A1 is less than break 1 then low,
+                              A1 > classes[[2]] & A1 <= classes[[3]] ~ "med-low", #if bt breaks 1 and 2
+                              A1 > classes[[3]] & A1 <= classes[[4]] ~ "medium", #if bt breaks 1 and 2 then medium
+                              A1 > classes[[4]] ~ "high")) %>% #if higher than break 2 then high
+  #correct the variable type to ordered categorical variable
+  mutate(class_A1 = factor(class_A1, ordered = T, levels = c("low", "med-low", "medium", "high")))
+
+#this plot shows you what was just done to confirm that it looks even and reasonable
+ggplot(df.plot) +
+  aes(x = A1, fill = class_A1) +
+  stat_density(position = "identity", alpha = 0.7, adjust = 0.8) +
+  theme_minimal()
+
+#Generate coordinates for points based on feature reduction algorithm
+#used in the PERMANOVA analysis
+mds <- metaMDS(dune, #use same dataframe as in the PERMANOVA
+               distance = "chao", #and the same ordination for consistency
+               k = 2, #number of dimensions for plotting
+               trymax = 9999, #how many tries to create the descriptive model
+               trace = FALSE) #DO NOT PRINT THE PROGRESS (boring)
+
+########################
+#PLOT TO CHECK ACCURACY#
+########################
+
+
+plot(mds)
+
+#add coordinates to the plotting dataframe
+df.plot <- df.plot %>%
+  mutate(x = mds$point[,1]) %>%
+  mutate(y = mds$point[,2])
+
+#this plot visualises how well the two functions separate the data
+#based on your chosen predictor variable
+ggplot(df.plot) +
+  aes(x = x, y = y, color = class_A1) +
+  geom_point(size = 3) +
+  theme_minimal()
+
+ggplot(df.plot) +
+  aes(x = x, y = y, color = Management) +
+  geom_point(size = 3) +
+  theme_minimal()
+
+ggplot(df.plot) +
+  aes(x = x, y = y, color = Moisture) +
+  geom_point(size = 3) +
+  theme_minimal()
